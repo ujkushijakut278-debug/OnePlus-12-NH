@@ -1,24 +1,91 @@
-name: NetHunter Debug2 - OnePlus 12
+name: NetHunter Kernel - OnePlus 12 SM8650
 on:
   workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-    - name: Checkout WildKernels Source
+    - name: Checkout NetHunter configs
       uses: actions/checkout@v4
       with:
-        repository: WildKernels/OnePlus_KernelSU_SUSFS
-        ref: main
-        submodules: recursive
-        fetch-depth: 1
-    - name: Show configs and manifests
+        path: nethunter-overlay
+
+    - name: Install Dependencies
       run: |
-        echo "=== configs/oos16 ==="
-        ls -la configs/oos16/ 2>/dev/null || echo "empty"
-        echo "=== manifests/oos16 ==="
-        ls -la manifests/oos16/ 2>/dev/null || echo "empty"
-        echo "=== manifests/oos16 content ==="
-        cat manifests/oos16/*.xml 2>/dev/null | head -50
-        echo "=== configs/oos16 content ==="
-        cat configs/oos16/* 2>/dev/null | head -50
+        sudo apt-get update -qq
+        sudo apt-get install -y bc bison flex libssl-dev libelf-dev python3 zip unzip git build-essential pahole libncurses-dev binutils-aarch64-linux-gnu repo
+
+    - name: Checkout OnePlus 12 Kernel Source
+      run: |
+        mkdir -p kernel_workspace && cd kernel_workspace
+        git clone --depth=1           -b oneplus/sm8650_b_16.0.0_oneplus12           https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8650           ./
+        git clone --depth=1           -b oneplus/sm8650_b_16.0.0_oneplus12           https://github.com/OnePlusOSS/android_kernel_common_oneplus_sm8650           kernel_platform/common
+
+    - name: Verify Kernel Version
+      run: |
+        cd kernel_workspace/kernel_platform/common
+        echo "=== Makefile version ==="
+        head -5 Makefile
+        echo "=== Configs available ==="
+        ls arch/arm64/configs/ | grep -iE "pineapple|gki|op12" | head -10
+
+    - name: Cache Toolchain
+      id: cache-tc
+      uses: actions/cache@v4
+      with:
+        path: ~/toolchains
+        key: llvm-17-v2
+
+    - name: Download Clang
+      if: steps.cache-tc.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/toolchains/clang
+        cd ~/toolchains/clang
+        wget -q "https://github.com/llvm/llvm-project/releases/download/llvmorg-17.0.6/clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04.tar.xz" -O clang.tar.xz
+        tar -xf clang.tar.xz --strip-components=1 && rm clang.tar.xz
+
+    - name: Apply NetHunter Configs
+      run: |
+        cd kernel_workspace/kernel_platform/common
+        CFG=$(ls arch/arm64/configs/ | grep -i pineapple | head -1)
+        [ -z "$CFG" ] && CFG=$(ls arch/arm64/configs/ | grep -i gki | head -1)
+        [ -z "$CFG" ] && CFG="defconfig"
+        echo "Using defconfig: $CFG"
+        echo "DEFCONFIG=$CFG" >> $GITHUB_ENV
+        for f in $GITHUB_WORKSPACE/nethunter-overlay/nethunter/configs/*.config; do
+          [ -f "$f" ] || continue
+          cat "$f" >> arch/arm64/configs/$CFG
+          echo "Applied: $(basename $f)"
+        done
+
+    - name: Build Kernel
+      run: |
+        export PATH="$HOME/toolchains/clang/bin:$PATH"
+        cd kernel_workspace/kernel_platform/common
+        mkdir -p out
+        make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out $DEFCONFIG
+        make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out Image 2>&1 | tee $GITHUB_WORKSPACE/build.log
+        ls -lh out/arch/arm64/boot/Image || (tail -50 $GITHUB_WORKSPACE/build.log && exit 1)
+
+    - name: Package AnyKernel3
+      run: |
+        git clone --depth=1 https://github.com/WildKernels/AnyKernel3 /tmp/ak3
+        cp kernel_workspace/kernel_platform/common/out/arch/arm64/boot/Image /tmp/ak3/
+        cp nethunter-overlay/wild_ak3/anykernel.sh /tmp/ak3/
+        printf "android14-6.1.141\nOOS16\nKSUN\nNetHunter\n" > /tmp/ak3/OP12_OOS16.txt
+        cd /tmp/ak3
+        zip -r9 "NetHunter-OP12-$(date +%Y%m%d%H%M).zip" . -x ".git/*"
+
+    - name: Upload ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: nethunter-op12-${{ github.run_number }}
+        path: /tmp/ak3/NetHunter-OP12-*.zip
+        retention-days: 30
+
+    - name: Upload log nese fail
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-${{ github.run_number }}
+        path: build.log
