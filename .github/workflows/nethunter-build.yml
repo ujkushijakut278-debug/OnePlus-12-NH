@@ -1,8 +1,6 @@
 name: NetHunter Kernel - OnePlus 12 SM8650
-
 on:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -14,33 +12,20 @@ jobs:
         ref: main
         submodules: recursive
         fetch-depth: 1
-
     - name: Checkout NetHunter configs
       uses: actions/checkout@v4
       with:
         path: nethunter-overlay
-
-    - name: Show repo structure and find kernel version
-      run: |
-        echo "=== Root files ==="
-        ls -la
-        echo "=== Looking for Makefile ==="
-        find . -name "Makefile" -maxdepth 4 | head -10
-        echo "=== SUBLEVEL check ==="
-        grep "^SUBLEVEL" Makefile || echo "No Makefile in root"
-
     - name: Install Dependencies
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y bc bison flex libssl-dev libelf-dev python3 zip unzip git build-essential pahole libncurses-dev binutils-aarch64-linux-gnu
-
     - name: Cache Toolchain
       id: cache-tc
       uses: actions/cache@v4
       with:
         path: ~/toolchains
-        key: zyc-clang-20
-
+        key: llvm-17-v1
     - name: Download Clang
       if: steps.cache-tc.outputs.cache-hit != 'true'
       run: |
@@ -48,23 +33,21 @@ jobs:
         cd ~/toolchains/clang
         wget -q "https://github.com/llvm/llvm-project/releases/download/llvmorg-17.0.6/clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04.tar.xz" -O clang.tar.xz
         tar -xf clang.tar.xz --strip-components=1 && rm clang.tar.xz
-
-    - name: Apply NetHunter Configs
+    - name: Find defconfig and apply NetHunter
       run: |
-        echo "=== arch/arm64/configs ==="
-        ls arch/arm64/configs/ | grep -iE "pineapple|gki|op12|oneplus" || ls arch/arm64/configs/ | head -20
-        DEFCONFIG=$(ls arch/arm64/configs/ | grep -i pineapple | head -1)
-        [ -z "$DEFCONFIG" ] && DEFCONFIG=$(ls arch/arm64/configs/ | grep -i gki | head -1)
-        echo "Using defconfig: $DEFCONFIG"
-        for cfg in nethunter-overlay/nethunter/configs/*.config; do
-          [ -f "$cfg" ] || continue
-          echo "" >> arch/arm64/configs/$DEFCONFIG
-          echo "# NetHunter: $(basename $cfg)" >> arch/arm64/configs/$DEFCONFIG
-          cat "$cfg" >> arch/arm64/configs/$DEFCONFIG
-          echo "Applied: $(basename $cfg)"
+        echo "=== Available configs ==="
+        ls arch/arm64/configs/ | head -30
+        CFG=$(ls arch/arm64/configs/ | grep -i pineapple | head -1)
+        [ -z "$CFG" ] && CFG=$(ls arch/arm64/configs/ | grep -i gki | head -1)
+        [ -z "$CFG" ] && CFG="defconfig"
+        echo "Using: $CFG"
+        echo "DEFCONFIG=$CFG" >> $GITHUB_ENV
+        for f in nethunter-overlay/nethunter/configs/*.config; do
+          [ -f "$f" ] || continue
+          echo "" >> arch/arm64/configs/$CFG
+          cat "$f" >> arch/arm64/configs/$CFG
+          echo "Applied: $f"
         done
-        echo "DEFCONFIG=$DEFCONFIG" >> $GITHUB_ENV
-
     - name: Build Kernel
       run: |
         export PATH="$HOME/toolchains/clang/bin:$PATH"
@@ -72,7 +55,6 @@ jobs:
         make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out $DEFCONFIG
         make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out Image 2>&1 | tee build.log
         ls -lh out/arch/arm64/boot/Image || (tail -50 build.log && exit 1)
-
     - name: Package AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildKernels/AnyKernel3 /tmp/ak3
@@ -81,14 +63,12 @@ jobs:
         printf "android14-6.1.141\nOOS16\nKSUN\nNetHunter\n" > /tmp/ak3/OP12_OOS16.txt
         cd /tmp/ak3
         zip -r9 "NetHunter-OP12-$(date +%Y%m%d%H%M).zip" . -x ".git/*"
-
     - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
         name: nethunter-op12-${{ github.run_number }}
         path: /tmp/ak3/NetHunter-OP12-*.zip
         retention-days: 30
-
     - name: Upload log nese fail
       if: failure()
       uses: actions/upload-artifact@v4
