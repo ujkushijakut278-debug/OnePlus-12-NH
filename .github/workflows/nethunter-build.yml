@@ -51,19 +51,25 @@ jobs:
 
     - name: Apply NetHunter Configs
       run: |
+        echo "=== arch/arm64/configs ==="
+        ls arch/arm64/configs/ | grep -iE "pineapple|gki|op12|oneplus" || ls arch/arm64/configs/ | head -20
+        DEFCONFIG=$(ls arch/arm64/configs/ | grep -i pineapple | head -1)
+        [ -z "$DEFCONFIG" ] && DEFCONFIG=$(ls arch/arm64/configs/ | grep -i gki | head -1)
+        echo "Using defconfig: $DEFCONFIG"
         for cfg in nethunter-overlay/nethunter/configs/*.config; do
           [ -f "$cfg" ] || continue
-          echo "" >> arch/arm64/configs/pineapple_GKI.config
-          echo "# NetHunter: $(basename $cfg)" >> arch/arm64/configs/pineapple_GKI.config
-          cat "$cfg" >> arch/arm64/configs/pineapple_GKI.config
+          echo "" >> arch/arm64/configs/$DEFCONFIG
+          echo "# NetHunter: $(basename $cfg)" >> arch/arm64/configs/$DEFCONFIG
+          cat "$cfg" >> arch/arm64/configs/$DEFCONFIG
           echo "Applied: $(basename $cfg)"
         done
+        echo "DEFCONFIG=$DEFCONFIG" >> $GITHUB_ENV
 
     - name: Build Kernel
       run: |
         export PATH="$HOME/toolchains/clang/bin:$PATH"
         mkdir -p out
-        make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out pineapple_GKI.config
+        make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out $DEFCONFIG
         make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out Image 2>&1 | tee build.log
         ls -lh out/arch/arm64/boot/Image || (tail -50 build.log && exit 1)
 
