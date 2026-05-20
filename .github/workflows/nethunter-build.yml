@@ -1,4 +1,4 @@
-name: NetHunter Debug - OnePlus 12
+name: NetHunter Debug2 - OnePlus 12
 on:
   workflow_dispatch:
 jobs:
@@ -12,13 +12,13 @@ jobs:
         ref: main
         submodules: recursive
         fetch-depth: 1
-    - name: Show full repo structure
+    - name: Show configs and manifests
       run: |
-        echo "=== ROOT ==="
-        ls -la
-        echo "=== ALL DIRS ==="
-        find . -type d -not -path './.git/*' | head -30
-        echo "=== ALL FILES root ==="
-        find . -maxdepth 2 -type f -not -path './.git/*' | head -40
-        echo "=== README ==="
-        cat README.md 2>/dev/null || cat readme.md 2>/dev/null || echo "No README"
+        echo "=== configs/oos16 ==="
+        ls -la configs/oos16/ 2>/dev/null || echo "empty"
+        echo "=== manifests/oos16 ==="
+        ls -la manifests/oos16/ 2>/dev/null || echo "empty"
+        echo "=== manifests/oos16 content ==="
+        cat manifests/oos16/*.xml 2>/dev/null | head -50
+        echo "=== configs/oos16 content ==="
+        cat configs/oos16/* 2>/dev/null | head -50
