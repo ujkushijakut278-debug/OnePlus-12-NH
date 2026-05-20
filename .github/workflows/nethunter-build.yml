@@ -1,0 +1,88 @@
+name: NetHunter Kernel - OnePlus 12 SM8650
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout WildKernels Source
+      uses: actions/checkout@v4
+      with:
+        repository: WildKernels/OnePlus_KernelSU_SUSFS
+        ref: android14-6.1
+        submodules: recursive
+        fetch-depth: 1
+
+    - name: Checkout NetHunter configs
+      uses: actions/checkout@v4
+      with:
+        path: nethunter-overlay
+
+    - name: Verify KMI 6.1.141
+      run: |
+        SUB=$(grep "^SUBLEVEL" Makefile | awk '{print $3}')
+        echo "SUBLEVEL = $SUB"
+        [ "$SUB" = "141" ] && echo "KMI OK" || (echo "KMI WRONG: $SUB" && exit 1)
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y bc bison flex libssl-dev libelf-dev python3 zip unzip git build-essential pahole libncurses-dev binutils-aarch64-linux-gnu
+
+    - name: Cache Toolchain
+      id: cache-tc
+      uses: actions/cache@v4
+      with:
+        path: ~/toolchains
+        key: zyc-clang-20
+
+    - name: Download Clang
+      if: steps.cache-tc.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p ~/toolchains/clang
+        cd ~/toolchains/clang
+        wget -q "https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250508-release/Clang-20.0.0git-20250508.tar.gz" -O clang.tar.gz
+        tar -xf clang.tar.gz && rm clang.tar.gz
+
+    - name: Apply NetHunter Configs
+      run: |
+        for cfg in nethunter-overlay/nethunter/configs/*.config; do
+          [ -f "$cfg" ] || continue
+          echo "" >> arch/arm64/configs/pineapple_GKI.config
+          echo "# NetHunter: $(basename $cfg)" >> arch/arm64/configs/pineapple_GKI.config
+          cat "$cfg" >> arch/arm64/configs/pineapple_GKI.config
+          echo "Applied: $(basename $cfg)"
+        done
+
+    - name: Build Kernel
+      run: |
+        export PATH="$HOME/toolchains/clang/bin:$PATH"
+        mkdir -p out
+        make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out pineapple_GKI.config
+        make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out Image 2>&1 | tee build.log
+        ls -lh out/arch/arm64/boot/Image || (tail -50 build.log && exit 1)
+
+    - name: Package AnyKernel3
+      run: |
+        git clone --depth=1 https://github.com/WildKernels/AnyKernel3 /tmp/ak3
+        cp out/arch/arm64/boot/Image /tmp/ak3/
+        cp nethunter-overlay/wild_ak3/anykernel.sh /tmp/ak3/ 2>/dev/null || true
+        printf "android14-6.1.141\nOOS16\nKSUN\nNetHunter\n" > /tmp/ak3/OP12_OOS16.txt
+        cd /tmp/ak3
+        zip -r9 "NetHunter-OP12-6.1.141-$(date +%Y%m%d%H%M).zip" . -x ".git/*"
+
+    - name: Upload ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: nethunter-op12-${{ github.run_number }}
+        path: /tmp/ak3/NetHunter-OP12-*.zip
+        retention-days: 30
+
+    - name: Upload log nese fail
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-${{ github.run_number }}
+        path: build.log
