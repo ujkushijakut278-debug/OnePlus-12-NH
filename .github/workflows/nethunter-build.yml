@@ -56,14 +56,17 @@ jobs:
         make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out Image 2>&1 | tee $GITHUB_WORKSPACE/build.log
         ls -lh out/arch/arm64/boot/Image || (tail -50 $GITHUB_WORKSPACE/build.log && exit 1)
 
-    - name: Package AnyKernel3
+    - name: Package with wild_ak3
       run: |
-        git clone --depth=1 https://github.com/WildKernels/AnyKernel3 /tmp/ak3
-        cp $KERNEL_DIR/out/arch/arm64/boot/Image /tmp/ak3/
-        cp nethunter-overlay/wild_ak3/anykernel.sh /tmp/ak3/
+        cp -r nethunter-overlay/wild_ak3 /tmp/ak3
+        cp $KERNEL_DIR/out/arch/arm64/boot/Image /tmp/ak3/Image
         printf "android14-6.1.141\nOOS16\nKSUN\nNetHunter\n" > /tmp/ak3/OP12_OOS16.txt
+        echo "=== AK3 contents ==="
+        ls -la /tmp/ak3/
+        ls -la /tmp/ak3/tools/
         cd /tmp/ak3
         zip -r9 "NetHunter-OP12-$(date +%Y%m%d%H%M).zip" . -x ".git/*"
+        ls -lh NetHunter-OP12-*.zip
 
     - name: Upload ZIP
       uses: actions/upload-artifact@v4
