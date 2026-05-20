@@ -1,4 +1,4 @@
-name: NetHunter Kernel - OnePlus 12 SM8650
+name: NetHunter Kernel v2 - OnePlus 12
 on:
   workflow_dispatch:
 jobs:
@@ -20,14 +20,7 @@ jobs:
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y bc bison flex libssl-dev libelf-dev python3 zip unzip git build-essential pahole libncurses-dev binutils-aarch64-linux-gnu
-    - name: Cache Toolchain
-      id: cache-tc
-      uses: actions/cache@v4
-      with:
-        path: ~/toolchains
-        key: llvm-17-v1
     - name: Download Clang
-      if: steps.cache-tc.outputs.cache-hit != 'true'
       run: |
         mkdir -p ~/toolchains/clang
         cd ~/toolchains/clang
@@ -40,13 +33,12 @@ jobs:
         CFG=$(ls arch/arm64/configs/ | grep -i pineapple | head -1)
         [ -z "$CFG" ] && CFG=$(ls arch/arm64/configs/ | grep -i gki | head -1)
         [ -z "$CFG" ] && CFG="defconfig"
-        echo "Using: $CFG"
+        echo "Using defconfig: $CFG"
         echo "DEFCONFIG=$CFG" >> $GITHUB_ENV
         for f in nethunter-overlay/nethunter/configs/*.config; do
           [ -f "$f" ] || continue
-          echo "" >> arch/arm64/configs/$CFG
           cat "$f" >> arch/arm64/configs/$CFG
-          echo "Applied: $f"
+          echo "Applied: $(basename $f)"
         done
     - name: Build Kernel
       run: |
