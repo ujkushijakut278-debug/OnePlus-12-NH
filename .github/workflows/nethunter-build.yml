@@ -4,6 +4,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      DEFCONFIG: gki_defconfig
+      KERNEL_DIR: kernel_workspace/kernel_platform/common
     steps:
     - name: Checkout NetHunter configs
       uses: actions/checkout@v4
@@ -13,28 +16,20 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y bc bison flex libssl-dev libelf-dev python3 zip unzip git build-essential pahole libncurses-dev binutils-aarch64-linux-gnu repo
+        sudo apt-get install -y bc bison flex libssl-dev libelf-dev python3 zip unzip git build-essential pahole libncurses-dev binutils-aarch64-linux-gnu
 
     - name: Checkout OnePlus 12 Kernel Source
       run: |
-        mkdir -p kernel_workspace && cd kernel_workspace
-        git clone --depth=1           -b oneplus/sm8650_b_16.0.0_oneplus12           https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8650           ./
-        git clone --depth=1           -b oneplus/sm8650_b_16.0.0_oneplus12           https://github.com/OnePlusOSS/android_kernel_common_oneplus_sm8650           kernel_platform/common
-
-    - name: Verify Kernel Version
-      run: |
-        cd kernel_workspace/kernel_platform/common
-        echo "=== Makefile version ==="
-        head -5 Makefile
-        echo "=== Configs available ==="
-        ls arch/arm64/configs/ | grep -iE "pineapple|gki|op12" | head -10
+        mkdir -p kernel_workspace
+        git clone --depth=1 -b oneplus/sm8650_b_16.0.0_oneplus12 https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8650 kernel_workspace/
+        git clone --depth=1 -b oneplus/sm8650_b_16.0.0_oneplus12 https://github.com/OnePlusOSS/android_kernel_common_oneplus_sm8650 kernel_workspace/kernel_platform/common
 
     - name: Cache Toolchain
       id: cache-tc
       uses: actions/cache@v4
       with:
         path: ~/toolchains
-        key: llvm-17-v2
+        key: llvm-17-v3
 
     - name: Download Clang
       if: steps.cache-tc.outputs.cache-hit != 'true'
@@ -46,22 +41,16 @@ jobs:
 
     - name: Apply NetHunter Configs
       run: |
-        cd kernel_workspace/kernel_platform/common
-        CFG=$(ls arch/arm64/configs/ | grep -i pineapple | head -1)
-        [ -z "$CFG" ] && CFG=$(ls arch/arm64/configs/ | grep -i gki | head -1)
-        [ -z "$CFG" ] && CFG="defconfig"
-        echo "Using defconfig: $CFG"
-        echo "DEFCONFIG=$CFG" >> $GITHUB_ENV
-        for f in $GITHUB_WORKSPACE/nethunter-overlay/nethunter/configs/*.config; do
+        for f in nethunter-overlay/nethunter/configs/*.config; do
           [ -f "$f" ] || continue
-          cat "$f" >> arch/arm64/configs/$CFG
+          cat "$f" >> $KERNEL_DIR/arch/arm64/configs/$DEFCONFIG
           echo "Applied: $(basename $f)"
         done
 
     - name: Build Kernel
       run: |
         export PATH="$HOME/toolchains/clang/bin:$PATH"
-        cd kernel_workspace/kernel_platform/common
+        cd $KERNEL_DIR
         mkdir -p out
         make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out $DEFCONFIG
         make -j$(nproc) ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 O=out Image 2>&1 | tee $GITHUB_WORKSPACE/build.log
@@ -70,7 +59,7 @@ jobs:
     - name: Package AnyKernel3
       run: |
         git clone --depth=1 https://github.com/WildKernels/AnyKernel3 /tmp/ak3
-        cp kernel_workspace/kernel_platform/common/out/arch/arm64/boot/Image /tmp/ak3/
+        cp $KERNEL_DIR/out/arch/arm64/boot/Image /tmp/ak3/
         cp nethunter-overlay/wild_ak3/anykernel.sh /tmp/ak3/
         printf "android14-6.1.141\nOOS16\nKSUN\nNetHunter\n" > /tmp/ak3/OP12_OOS16.txt
         cd /tmp/ak3
